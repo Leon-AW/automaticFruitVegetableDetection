@@ -1,0 +1,5 @@
+baseline_model: ultralytics/yolov8s.pt  # Pretrained model path (use YOLOv8s by default)
+epochs: 50
+batch_size: 16
+imgsz: 640
+learning_rate: 0.001 

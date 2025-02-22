@@ -1,0 +1,131 @@
+train: "/Users/leon/Desktop/Master of Science Informatik/5. Semester/HCI/automaticFruitVegetableDetection/fruit_veg_detection_finetuning/data/processed/normalized/train"
+val: "/Users/leon/Desktop/Master of Science Informatik/5. Semester/HCI/automaticFruitVegetableDetection/fruit_veg_detection_finetuning/data/processed/normalized/val"
+test: "/Users/leon/Desktop/Master of Science Informatik/5. Semester/HCI/automaticFruitVegetableDetection/fruit_veg_detection_finetuning/data/processed/normalized/test"
+
+nc: 120
+names:
+  - apple
+  - apricot
+  - avocado
+  - avocado ripe
+  - banana
+  - beetroot red
+  - blueberry
+  - cabbage
+  - cactus fruit
+  - cantaloupe
+  - carambula
+  - carrot
+  - cauliflower
+  - cherry
+  - cherry wax
+  - chestnut
+  - clementine
+  - cocos
+  - corn
+  - cucumber
+  - dates
+  - eggplant
+  - fig
+  - ginger root
+  - granadilla
+  - grape
+  - grapefruit
+  - guava
+  - hazelnut
+  - huckleberry
+  - kiwi
+  - kaki
+  - kohlrabi
+  - kumsquats
+  - lemon
+  - lime
+  - lychee
+  - mandarine
+  - mango
+  - mangostan
+  - maracuja
+  - melon piel de sapo
+  - mulberry
+  - nectarine
+  - nut
+  - onion
+  - orange
+  - papaya
+  - passion fruit
+  - peach
+  - pepino
+  - pear
+  - pepper
+  - physalis
+  - pineapple
+  - pitahaya red
+  - plum
+  - pomegranate
+  - pomelo sweetie
+  - potato
+  - quince
+  - rambutan
+  - raspberry
+  - redcurrant
+  - salak
+  - strawberry
+  - tamarillo
+  - tangelo
+  - tomato
+  - walnut
+  - watermelon
+  - zucchini
+  - chili
+  - blackberries
+  - bellpepper
+  - garlic
+  - radish
+  - persimmon
+  - apple-bag
+  - banana-bag
+  - chili-bag
+  - grapes-bag
+  - tomato-bag
+  - lemon-bag
+  - zone_ananas
+  - zone_apple
+  - zone_apricot
+  - zone_avocado
+  - zone_banana
+  - zone_beet
+  - zone_bellpepper
+  - zone_carambola
+  - zone_carrot
+  - zone_corn
+  - zone_cucumber
+  - zone_eggplant
+  - zone_figs
+  - zone_garlic
+  - zone_grape
+  - zone_guava
+  - zone_kiwi
+  - zone_lemon
+  - zone_lime
+  - zone_mango
+  - zone_melon
+  - zone_onion
+  - zone_orange
+  - zone_papaya
+  - zone_passionfruit
+  - zone_peach
+  - zone_pear
+  - zone_persimmon
+  - zone_pitaya
+  - zone_plum
+  - zone_pomegranate
+  - zone_radish
+  - zone_strawberry
+  - zone_tomato
+  - zone_watermelon
+  - zone_zucchini
+
+# Optionally also specify the path to the labels – if these are separate files.
+# For example:
+# nc: 72  # the number of classes (update accordingly)
+# names: fruit_veg_detection_finetuning/data/classes.yaml 

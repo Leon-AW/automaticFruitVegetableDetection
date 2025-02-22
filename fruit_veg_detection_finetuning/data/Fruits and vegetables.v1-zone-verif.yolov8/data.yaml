@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 65
+names: ['apple', 'apricot', 'avocado', 'banana', 'bellpepper', 'carrot', 'cucumber', 'eggplant', 'figs', 'garlic', 'grapes', 'kiwi', 'lemon', 'lime', 'mango', 'melon', 'onion', 'orange', 'peach', 'pear', 'persimmon', 'pineapple', 'plum', 'pomegranate', 'radish', 'strawberry', 'tomato', 'watermelon', 'zone_ananas', 'zone_apple', 'zone_apricot', 'zone_avocado', 'zone_banana', 'zone_beet', 'zone_bellpepper', 'zone_carambola', 'zone_carrot', 'zone_corn', 'zone_cucumber', 'zone_eggplant', 'zone_figs', 'zone_garlic', 'zone_grape', 'zone_guava', 'zone_kiwi', 'zone_lemon', 'zone_lime', 'zone_mango', 'zone_melon', 'zone_onion', 'zone_orange', 'zone_papaya', 'zone_passionfruit', 'zone_peach', 'zone_pear', 'zone_persimmon', 'zone_pitaya', 'zone_plum', 'zone_pomegranate', 'zone_radish', 'zone_strawberry', 'zone_tomato', 'zone_watermelon', 'zone_zucchini', 'zucchini']
+
+roboflow:
+  workspace: test-kuf7g
+  project: fruits-and-vegetables-rszxd
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/test-kuf7g/fruits-and-vegetables-rszxd/dataset/1

@@ -41,3 +41,20 @@ coverage.xml
 # OS generated files
 .DS_Store
 Thumbs.db 
+
+# Dataset directories (downloaded and merged data)
+fruit_veg_detection_finetuning/data/raw/
+fruit_veg_detection_finetuning/data/combined/
+fruit_veg_detection_finetuning/data/processed/
+
+# Optionally ignore heavy subdirectories in dataset folders (e.g., images)
+fruit_veg_detection_finetuning/data/*/train/
+fruit_veg_detection_finetuning/data/*/valid/
+fruit_veg_detection_finetuning/data/*/test/
+
+# Model checkpoints and saved weights
+fruit_veg_detection_finetuning/models/
+
+# Logs and temporary files
+runs/
+logs/
