@@ -1,9 +1,18 @@
 # Automatic Fruit & Vegetable Detection
 
-This project provides a real‑time object detection system that captures video from your webcam, processes each frame using the YOLOv8 model, and displays annotated detections with bounding boxes and labels. Although originally designed for fruit and vegetable detection, the current implementation now displays **all detections** provided by the model (trained on the COCO dataset).
+This project provides a real‑time object detection system that captures video from your webcam, processes each frame using the YOLOv8 model, and displays annotated detections with bounding boxes and labels. This updated version now only detects and displays objects that belong to specific classes corresponding to fruits and vegetables from the COCO dataset. The detected classes are:
+
+- **Fruits:**
+  - Banana
+  - Apple
+  - Orange
+  
+- **Vegetables:**
+  - Broccoli
+  - Carrot
 
 > **Note:**  
-> The YOLOv8 models are trained on the COCO dataset. While only a subset of these classes represents fruits and vegetables, the current implementation displays all detections provided by the model. For a more focused application, you can modify the script to filter based on class names.
+> The YOLOv8 models are trained on the COCO dataset. The detected fruit and vegetable classes are a subset of the available classes. For a more customized application, you can modify the script further to include or exclude classes as needed.
 
 ---
 
@@ -29,11 +38,13 @@ This project provides a real‑time object detection system that captures video 
 - **Real‑Time Detection:**  
   Captures your webcam feed in real‑time and annotates detections with bounding boxes and labels.
 
-- **Model Upgrade:**  
-  Uses the YOLOv8s model for improved accuracy while still achieving near real‑time performance on many laptops.
+- **Targeted Detection:**  
+  This updated implementation restricts detections to specific classes corresponding to fruits and vegetables. Detected objects include:
+  - **Fruits:** Banana, Apple, Orange
+  - **Vegetables:** Broccoli, Carrot
 
-- **Comprehensive Detection:**  
-  Processes and displays all detections provided by the model (trained on the COCO dataset).
+- **Model Upgrade:**  
+  Utilizes the YOLOv8s model, ensuring a balance between speed and accuracy.
 
 ---
 
@@ -94,7 +105,7 @@ The `requirements.txt` file includes:
 ## Project Structure
 
 - `fruit_detection.py`  
-  The main script that captures the webcam feed, performs real‑time detection using the YOLOv8s model, and displays annotated detections.
+  The main script that captures the webcam feed, performs real‑time detection using the YOLOv8s model, and displays annotated detections only for the specified fruits and vegetables (Banana, Apple, Orange, Broccoli, and Carrot).
 
 - `requirements.txt`  
   Contains the list of dependencies.
@@ -124,8 +135,10 @@ python fruit_detection.py
    Your webcam feed is captured and displayed in a new window.
 
 3. **Detection & Annotation:**  
-   The model processes each frame, and all detections (with bounding boxes and labels) are shown on the video feed.
-
+   The model processes each frame and only detects objects corresponding to the selected classes:
+   - **Fruits:** Banana, Apple, Orange
+   - **Vegetables:** Broccoli, Carrot
+   
 4. **Exit:**  
    Press `q` while the window is in focus to close the application.
 
@@ -159,8 +172,8 @@ python fruit_detection.py
 ## Advanced Usage
 
 - **Custom Detection Focus:**  
-  The current script displays all detections. To limit results to specific classes (e.g., only fruits and vegetables), you can modify the code to filter detections based on class names.
-  
+  The detection filtering is implemented in `fruit_detection.py` by passing specific class indices to the model. To modify which classes are detected, adjust the list of allowed indices in the script.
+
 - **Exploring Alternative Models:**  
   For enhanced performance or accuracy, experiment with other YOLO variants such as YOLOv8m, YOLOv9, or YOLOv10, provided your hardware can support them.
 
