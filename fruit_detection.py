@@ -5,6 +5,18 @@ def main():
     # 1. Load a pre-trained YOLOv8 model.
     model = YOLO("ultralytics/yolov8s.pt")
 
+    # Define allowed class indices for fruits and vegetables.
+    # Included classes:
+    #   46: banana (fruit)
+    #   47: apple (fruit)
+    #   49: orange (fruit)
+    #   50: broccoli (vegetable)
+    #   51: carrot (vegetable)
+    allowed_class_indices = [46, 47, 49, 50, 51]
+    
+    # You can check the full class mapping with:
+    # print(model.names)
+
     # 2. Initialize webcam capture (0 = default camera).
     cap = cv2.VideoCapture(0)
 
@@ -13,8 +25,8 @@ def main():
         if not ret:
             break  # Exit if there's an issue with the webcam feed
 
-        # 3. Run inference on the current frame.
-        results = model(frame)
+        # 3. Run inference on the current frame with detection filtering.
+        results = model(frame, classes=allowed_class_indices)
 
         # 4. Get an annotated frame from YOLO results (bounding boxes, labels).
         annotated_frame = results[0].plot()

@@ -1,9 +1,9 @@
 # Automatic Fruit & Vegetable Detection
 
-This project provides a real‑time object detection system that identifies fruits and vegetables from your webcam feed. It leverages the power of the YOLOv8 model (specifically the YOLOv8s variant) from the [Ultralytics](https://github.com/ultralytics/ultralytics) library combined with [OpenCV](https://opencv.org/) to capture video from your camera, process each frame, and display only produce detections (e.g., apple, banana, orange, broccoli, carrot).
+This project provides a real‑time object detection system that captures video from your webcam, processes each frame using the YOLOv8 model, and displays annotated detections with bounding boxes and labels. Although originally designed for fruit and vegetable detection, the current implementation now displays **all detections** provided by the model (trained on the COCO dataset).
 
 > **Note:**  
-> The default YOLOv8 models are trained on the COCO dataset, which only includes a limited set of fruit and vegetable classes. To detect a broader range of produce, you might consider fine‑tuning a custom model on a dedicated fruit and vegetable dataset.
+> The YOLOv8 models are trained on the COCO dataset. While only a subset of these classes represents fruits and vegetables, the current implementation displays all detections provided by the model. For a more focused application, you can modify the script to filter based on class names.
 
 ---
 
@@ -27,22 +27,22 @@ This project provides a real‑time object detection system that identifies frui
 ## Features
 
 - **Real‑Time Detection:**  
-  Processes your webcam feed in real‑time and annotates detections with bounding boxes and labels.
+  Captures your webcam feed in real‑time and annotates detections with bounding boxes and labels.
 
 - **Model Upgrade:**  
-  Uses the YOLOv8s model for improved accuracy compared to the nano model, while still maintaining near real‑time performance on typical laptop hardware.
+  Uses the YOLOv8s model for improved accuracy while still achieving near real‑time performance on many laptops.
 
-- **Selective Detection:**  
-  The application processes detections from the full model output and then filters results to display only fruits and vegetables (currently, apple, banana, orange, broccoli, and carrot).
+- **Comprehensive Detection:**  
+  Processes and displays all detections provided by the model (trained on the COCO dataset).
 
 ---
 
 ## Prerequisites
 
-- **Python:** Version 3.7 or later is recommended.
+- **Python:** Version 3.7 or later.
 - **Operating System:** Windows, macOS, or Linux.
-- **Webcam:** A functional camera is required for capturing real‑time video.
-- **Hardware:** For optimal performance with YOLOv8s, a GPU is advantageous—but many laptops can still process the stream in near real‑time using CPU.
+- **Webcam:** A functioning camera is required.
+- **Hardware:** A GPU is advantageous for optimal performance, though the CPU will suffice for near real‑time detection on many laptops.
 
 ---
 
@@ -50,66 +50,66 @@ This project provides a real‑time object detection system that identifies frui
 
 ### 1. Clone the Repository
 
-First, clone the project repository to your local machine:
+Clone the project repository to your local machine and change to the project directory:
 
 ```bash
 git clone <repository-url>
 cd automaticFruitVegetableDetection
 ```
 
+Replace `<repository-url>` with the actual URL of your Git repository.
+
 ### 2. Create a Virtual Environment
 
-Isolate all dependencies by creating and activating a virtual environment.
+#### For macOS/Linux:
 
-- **On macOS/Linux:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
 
-  ```bash
-  python3 -m venv venv
-  source venv/bin/activate
-  ```
+#### For Windows:
 
-- **On Windows:**
+Open Command Prompt or PowerShell and run:
 
-  ```bash
-  python -m venv venv
-  venv\Scripts\activate
-  ```
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
 
 ### 3. Install Dependencies
 
-With the virtual environment activated, install all required packages from `requirements.txt`:
+With the virtual environment activated, install the required packages from the `requirements.txt` file:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-The `requirements.txt` includes:
+The `requirements.txt` file includes:
 - **ultralytics:** Provides pre‑trained YOLOv8 models.
-- **opencv-python:** Captures webcam video and handles real‑time frame display.
+- **opencv-python:** Captures and displays the webcam feed.
 
 ---
 
 ## Project Structure
 
-A quick overview of the repository files:
-
 - `fruit_detection.py`  
-  The main script which captures the webcam feed, performs YOLOv8 real‑time fruit and vegetable detection, and displays the annotated results.
+  The main script that captures the webcam feed, performs real‑time detection using the YOLOv8s model, and displays annotated detections.
 
 - `requirements.txt`  
-  Lists all dependencies for the project.
+  Contains the list of dependencies.
 
 - `.gitignore`  
-  Contains rules for files and folders (like virtual environments, caches, and editor-specific settings) that Git should ignore.
+  Specifies files and folders that should be ignored by Git.
 
 - `README.md`  
-  This file, explaining how to install, run, and troubleshoot the project.
+  This file, providing detailed instructions for installation and usage.
 
 ---
 
 ## Running the Project
 
-After you have set up the environment and installed all dependencies, run the detection script:
+After completing the installation steps, run the detection script with:
 
 ```bash
 python fruit_detection.py
@@ -118,85 +118,63 @@ python fruit_detection.py
 ### What to Expect:
 
 1. **Model Loading:**  
-   The script loads the YOLOv8s model for detection.
+   The script loads the YOLOv8s model.
 
 2. **Webcam Initialization:**  
-   Your webcam feed will be captured and a window will open displaying the live feed.
+   Your webcam feed is captured and displayed in a new window.
 
-3. **Detection & Filtering:**  
-   The model processes each frame. It performs full inference and then filters the detections to only highlight fruits and vegetables (currently, apple, banana, orange, broccoli, and carrot).
+3. **Detection & Annotation:**  
+   The model processes each frame, and all detections (with bounding boxes and labels) are shown on the video feed.
 
-4. **Real‑Time Annotated Feed:**  
-   Bounding boxes and labels (with confidence scores) are drawn on the frame for each valid detection.
-
-5. **Exit:**  
+4. **Exit:**  
    Press `q` while the window is in focus to close the application.
 
 ---
 
 ## Troubleshooting
 
-### Webcam Not Displaying or Errors
+### Webcam Issues
 
 - **Camera Permissions:**  
-  On macOS, ensure that your Terminal or IDE is allowed to access the camera via **System Preferences** → **Security & Privacy** → **Privacy** → **Camera**.
+  - **macOS:** Ensure that your Terminal or your preferred IDE has permission to access the camera. Go to **System Preferences** → **Security & Privacy** → **Privacy** → **Camera**, and verify that your application is allowed.
+  - **Windows:** If you experience issues, try running your command prompt or PowerShell with administrator rights.
 
-- **Test Webcam Independently:**  
-  Run a minimal OpenCV webcam test:
+- **Testing Your Webcam:**  
+  Run a minimal OpenCV script to confirm that your webcam is working correctly.
 
-  ```python
-  import cv2
-  cap = cv2.VideoCapture(0)
-  if not cap.isOpened():
-      print("Cannot open camera")
-      exit()
-  while True:
-      ret, frame = cap.read()
-      if not ret:
-          print("Can't receive frame. Exiting...")
-          break
-      cv2.imshow("Camera Test", frame)
-      if cv2.waitKey(1) & 0xFF == ord('q'):
-          break
-  cap.release()
-  cv2.destroyAllWindows()
-  ```
+### Windows-Specific Notes
 
-- **Dependencies:**  
-  If issues arise during installation, ensure `pip` is up-to-date:
-
+- **Environment Activation:**  
+  Use the command `venv\Scripts\activate` to activate your virtual environment.
+- **Dependency Installation:**  
+  Ensure that your `pip` is up-to-date by running:
   ```bash
-  pip install --upgrade pip
+  python -m pip install --upgrade pip
   ```
-
-### Performance Considerations
-
-- **Model Choice:**  
-  YOLOv8s is used for its balance between speed and accuracy. If you have a powerful GPU and need even better detection accuracy, consider modifying the script to use YOLOv8m.
-- **Hardware:**  
-  On devices without a dedicated GPU, inference might be slightly slower. Adjust the resolution of the webcam feed (using OpenCV's `cv2.resize`) if necessary.
+- **Administrator Privileges:**  
+  If you encounter permission-related errors, consider launching your command prompt or PowerShell as an administrator.
 
 ---
 
 ## Advanced Usage
 
-- **Custom Detection Classes:**  
-  The current script filters detections to only include a selected set of fruits and vegetables. For additional classes, you would need to either modify the allowed list or train/fine‑tune a custom model on a more comprehensive dataset.
-
-- **Exploring Newer YOLO Models:**  
-  Recent models (e.g., YOLOv9 and YOLOv10) offer increased accuracy at the expense of increased computational requirements. Experiment with different versions if your hardware allows.
+- **Custom Detection Focus:**  
+  The current script displays all detections. To limit results to specific classes (e.g., only fruits and vegetables), you can modify the code to filter detections based on class names.
+  
+- **Exploring Alternative Models:**  
+  For enhanced performance or accuracy, experiment with other YOLO variants such as YOLOv8m, YOLOv9, or YOLOv10, provided your hardware can support them.
 
 ---
 
 ## License
 
-*(Include license information if applicable.)*
+MIT License
 
 ---
 
 ## Acknowledgements
 
 - [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) – The library for state‑of‑the‑art object detection models.
-- [OpenCV](https://opencv.org/) – The library used for real-time image processing.
+- [OpenCV](https://opencv.org/) – The library used for real‑time image processing.
 
-For questions or to report issues, please open an issue in the repository.
+For questions or contributions, please open an issue or submit a pull request.
