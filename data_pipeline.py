@@ -24,12 +24,22 @@ def download_dataset():
 def get_training_dir(dataset_dir):
     """
     Returns the path to the training set directory.
+    
+    Updated to reflect the dataset structure downloaded from fruits-360_dataset_100x100:
+    The folder structure is:
+      dataset_dir/
+         fruits-360_dataset_100x100/
+             fruits-360/
+                 Training/
+                 Test/
+                 Readme.md
+                 LICENSE
     """
-    # The full path to the training directory
+    # The full path to the training directory using the new dataset structure.
     training_dir = os.path.join(dataset_dir, 
-                               "fruits-360_dataset_original-size",
-                               "fruits-360-original-size",
-                               "Training")
+                                "fruits-360_dataset_100x100",
+                                "fruits-360",
+                                "Training")
     if not os.path.isdir(training_dir):
         raise ValueError(f"'Training' directory not found in {dataset_dir}. Check the dataset structure.")
     print("Training directory found at:", training_dir)
