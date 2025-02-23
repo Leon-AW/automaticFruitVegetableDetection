@@ -12,7 +12,26 @@ def load_efficientnet(model_path, num_classes):
     model = models.efficientnet_b3(weights=None)
     in_features = model.classifier[1].in_features
     model.classifier[1] = nn.Linear(in_features, num_classes)
-    model.load_state_dict(torch.load(model_path))
+    
+    # Modified loading mechanism
+    try:
+        # Try loading with map_location
+        state_dict = torch.load(model_path, map_location=torch.device('cpu'))
+        model.load_state_dict(state_dict)
+    except Exception as e:
+        print(f"Error loading model: {e}")
+        print("Trying alternative loading method...")
+        try:
+            # Alternative loading method
+            checkpoint = torch.load(model_path, map_location='cpu')
+            if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                model.load_state_dict(checkpoint['state_dict'])
+            else:
+                model.load_state_dict(checkpoint)
+        except Exception as e:
+            print(f"Failed to load model: {e}")
+            raise
+    
     model.eval()
     return model
 
