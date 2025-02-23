@@ -241,16 +241,7 @@ def main():
         
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            save_dict = {
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'scheduler_state_dict': scheduler.state_dict(),
-                'best_val_loss': best_val_loss,
-                'num_classes': num_classes,
-                'class_names': all_classes
-            }
-            torch.save(save_dict, save_path)
+            torch.save(model.state_dict(), save_path)
             print("Saved best model.")
 
     print("Training complete.")
