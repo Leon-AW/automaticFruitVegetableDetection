@@ -17,8 +17,7 @@ def main():
     # --- Load classes from YAML ---
     with open("classes.yaml", "r") as f:
         classes_data = yaml.safe_load(f)
-    # The top-level key is "fruit_and_vegetables". The folder names in your dataset
-    # should match these keys. Adjust if needed.
+    # The top-level key is "fruit_and_vegetables". 
     all_classes = list(classes_data["fruit_and_vegetables"].keys())
     num_classes = len(all_classes)
     print(f"Number of classes from YAML: {num_classes}")
@@ -37,15 +36,23 @@ def main():
     # Get the dataset directory from kagglehub
     dataset_dir = kagglehub.dataset_download("moltean/fruits")
 
-    # Construct the full paths to Training and Test directories
+    # Adapted path: Use the new dataset structure
+    # Now the downloaded dataset will have:
+    #   dataset_dir/
+    #       fruits-360_dataset_100x100/
+    #           fruits-360/
+    #               Training/
+    #               Test/
+    #               Readme.md
+    #               LICENSE
     train_dir = os.path.join(dataset_dir, 
-                            "fruits-360_dataset_original-size",
-                            "fruits-360-original-size",
-                            "Training")
+                             "fruits-360_dataset_100x100",
+                             "fruits-360",
+                             "Training")
     test_dir = os.path.join(dataset_dir, 
-                           "fruits-360_dataset_original-size",
-                           "fruits-360-original-size",
-                           "Test")
+                            "fruits-360_dataset_100x100",
+                            "fruits-360",
+                            "Test")
 
     # Verify the directories exist
     if not os.path.isdir(train_dir):
@@ -56,7 +63,7 @@ def main():
     print(f"Training directory: {train_dir}")
     print(f"Test directory: {test_dir}")
 
-    # EfficientNet-B3 (from torchvision) recommends an input size of 300x300.
+    # EfficientNet-B3 recommends an input size of 300x300.
     train_transforms = transforms.Compose([
         transforms.RandomResizedCrop(300),
         transforms.RandomHorizontalFlip(),
@@ -107,13 +114,10 @@ def main():
 
     # --- Model Setup ---
     model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
-    # Replace the classifier head of EfficientNet-B3. In torchvision, the classifier is a Sequential:
-    # [Dropout, Linear]. We replace the Linear layer.
     in_features = model.classifier[1].in_features
     model.classifier[1] = nn.Linear(in_features, num_classes)
     model = model.to(device)
 
-    # Enable parallel processing if multiple GPUs are available
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs!")
         model = nn.DataParallel(model)
@@ -121,10 +125,8 @@ def main():
     # --- Training Setup ---
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', 
-                                                   factor=0.5, patience=3)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
-    # Initialize gradient scaler for mixed precision training
     scaler = GradScaler() if torch.cuda.is_available() else None
 
     # --- Training Loop ---
@@ -139,9 +141,7 @@ def main():
         correct = 0
         total = 0
 
-        # Training phase with progress bar
-        train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch+1}", 
-                         leave=True)
+        train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch+1}", leave=True)
         
         for images, labels in train_pbar:
             images, labels = images.to(device), labels.to(device)
@@ -149,16 +149,13 @@ def main():
             optimizer.zero_grad()
             
             if torch.cuda.is_available():
-                # Use mixed precision training on GPU
                 with autocast():
                     outputs = model(images)
                     loss = criterion(outputs, labels)
-                
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
             else:
-                # Regular training on CPU
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 loss.backward()
@@ -169,7 +166,6 @@ def main():
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             
-            # Update progress bar with current loss and accuracy
             train_pbar.set_postfix({
                 'loss': f'{loss.item():.4f}',
                 'acc': f'{100.0 * correct / total:.2f}%'
@@ -204,7 +200,6 @@ def main():
                 total_val += labels.size(0)
                 correct_val += (predicted == labels).sum().item()
                 
-                # Update validation progress bar
                 val_pbar.set_postfix({
                     'loss': f'{loss.item():.4f}',
                     'acc': f'{100.0 * correct_val / total_val:.2f}%'
@@ -214,13 +209,10 @@ def main():
         val_acc = correct_val / total_val
         print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
 
-        # Learning rate scheduling
         scheduler.step(val_loss)
         
-        # Save best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            # Save model state
             save_dict = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
