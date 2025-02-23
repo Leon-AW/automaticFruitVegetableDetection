@@ -12,6 +12,25 @@ from torch.utils.data import DataLoader
 import kagglehub
 import multiprocessing
 from torch.cuda.amp import autocast, GradScaler
+import urllib.request  # Needed for the patch
+
+# --- Patch torch.hub.download_url_to_file to include a progress bar ---
+_original_download_url_to_file = torch.hub.download_url_to_file
+
+def download_url_to_file_with_progress(url, dst, hash_prefix=None, progress=True):
+    if not progress:
+        return _original_download_url_to_file(url, dst, hash_prefix, progress)
+    desc = os.path.basename(dst) or "download"
+    with tqdm(unit='B', unit_scale=True, miniters=1, desc=desc) as pbar:
+        last_block = [0]
+        def reporthook(block_num, block_size, total_size):
+            if total_size is not None:
+                pbar.total = total_size
+            pbar.update((block_num - last_block[0]) * block_size)
+            last_block[0] = block_num
+        urllib.request.urlretrieve(url, dst, reporthook=reporthook)
+
+torch.hub.download_url_to_file = download_url_to_file_with_progress
 
 def main():
     # --- Load classes from YAML ---
@@ -46,22 +65,30 @@ def main():
     #               Readme.md
     #               LICENSE
     train_dir = os.path.join(dataset_dir, 
-                             "fruits-360_dataset_100x100",
-                             "fruits-360",
-                             "Training")
-    test_dir = os.path.join(dataset_dir, 
                             "fruits-360_dataset_100x100",
                             "fruits-360",
-                            "Test")
+                            "Training")
+    test_dir = os.path.join(dataset_dir, 
+                           "fruits-360_dataset_100x100",
+                           "fruits-360",
+                           "Test")
 
-    # Verify the directories exist
-    if not os.path.isdir(train_dir):
-        raise ValueError(f"Training directory {train_dir} does not exist. Contents of dataset directory: {os.listdir(dataset_dir)}")
-    if not os.path.isdir(test_dir):
-        raise ValueError(f"Test directory {test_dir} does not exist. Contents of dataset directory: {os.listdir(dataset_dir)}")
+    # Load the dataset first to get the actual classes from the data
+    temp_dataset = ImageFolder(root=train_dir)
+    dataset_classes = temp_dataset.classes
+    class_to_idx = temp_dataset.class_to_idx
+    
+    # Verify class alignment
+    if len(dataset_classes) != num_classes:
+        print(f"Warning: Mismatch between YAML classes ({num_classes}) and dataset classes ({len(dataset_classes)})")
+        print("Using dataset classes instead of YAML classes")
+        num_classes = len(dataset_classes)
+        all_classes = dataset_classes
 
-    print(f"Training directory: {train_dir}")
-    print(f"Test directory: {test_dir}")
+    # Print class mapping for debugging
+    print("\nClass mapping:")
+    for idx, class_name in enumerate(dataset_classes):
+        print(f"{idx}: {class_name}")
 
     # EfficientNet-B3 recommends an input size of 300x300.
     train_transforms = transforms.Compose([
@@ -113,6 +140,7 @@ def main():
     )
 
     # --- Model Setup ---
+    # This call will trigger the download (if not cached) and show a progress bar.
     model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
     in_features = model.classifier[1].in_features
     model.classifier[1] = nn.Linear(in_features, num_classes)
@@ -127,7 +155,7 @@ def main():
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
-    scaler = GradScaler() if torch.cuda.is_available() else None
+    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
 
     # --- Training Loop ---
     num_epochs = 20
@@ -149,7 +177,7 @@ def main():
             optimizer.zero_grad()
             
             if torch.cuda.is_available():
-                with autocast():
+                with torch.amp.autocast('cuda'):
                     outputs = model(images)
                     loss = criterion(outputs, labels)
                 scaler.scale(loss).backward()
@@ -188,7 +216,7 @@ def main():
                 images, labels = images.to(device), labels.to(device)
                 
                 if torch.cuda.is_available():
-                    with autocast():
+                    with torch.amp.autocast('cuda'):
                         outputs = model(images)
                         loss = criterion(outputs, labels)
                 else:
