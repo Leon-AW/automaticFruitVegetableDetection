@@ -11,8 +11,8 @@ import torchvision.models as models
 from torch.utils.data import DataLoader
 import kagglehub
 import multiprocessing
-from torch.cuda.amp import autocast, GradScaler
 import urllib.request  # Needed for the patch
+from sklearn.model_selection import KFold
 
 # --- Patch torch.hub.download_url_to_file to include a progress bar ---
 _original_download_url_to_file = torch.hub.download_url_to_file
@@ -36,15 +36,14 @@ def main():
     # --- Load classes from YAML ---
     with open("classes.yaml", "r") as f:
         classes_data = yaml.safe_load(f)
-    # The top-level key is "fruit_and_vegetables". 
     all_classes = list(classes_data["fruit_and_vegetables"].keys())
     num_classes = len(all_classes)
     print(f"Number of classes from YAML: {num_classes}")
 
     # --- Device configuration ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_workers = 4 if torch.cuda.is_available() else 2  # More workers for GPU
-    pin_memory = torch.cuda.is_available()  # Only pin memory if using GPU
+    num_workers = 4 if torch.cuda.is_available() else 2  # Mehr Worker bei GPU
+    pin_memory = torch.cuda.is_available()  # Pin memory nur, wenn GPU verwendet wird
     
     print(f"Using device: {device}")
     if torch.cuda.is_available():
@@ -73,10 +72,9 @@ def main():
                            "fruits-360",
                            "Test")
 
-    # Load the dataset first to get the actual classes from the data
+    # Lade den Datensatz zunächst, um die tatsächlichen Klassen zu erhalten
     temp_dataset = ImageFolder(root=train_dir)
     dataset_classes = temp_dataset.classes
-    class_to_idx = temp_dataset.class_to_idx
     
     # Verify class alignment
     if len(dataset_classes) != num_classes:
@@ -143,7 +141,11 @@ def main():
     # This call will trigger the download (if not cached) and show a progress bar.
     model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
     in_features = model.classifier[1].in_features
-    model.classifier[1] = nn.Linear(in_features, num_classes)
+    model.classifier = nn.Sequential(
+        nn.Dropout(0.3),                  # Dropout zum Schutz vor Overfitting
+        nn.BatchNorm1d(in_features),       # Batch Normalization zur Stabilisierung des Lernens
+        nn.Linear(in_features, num_classes)  # Finaler Linear-Layer für die Klassifizierung
+    )
     model = model.to(device)
 
     if torch.cuda.device_count() > 1:
@@ -158,7 +160,9 @@ def main():
     scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
 
     # --- Training Loop ---
-    num_epochs = 20
+    num_epochs = 10
+    early_stopping_patience = 3  # Abbruch, wenn sich der Validierungs-Loss 5 Epochen lang nicht verbessert
+    no_improve_count = 0
     best_val_loss = float("inf")
     save_path = "fine_tuned_efficientnet_b3.pth"
 
@@ -241,8 +245,14 @@ def main():
         
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            no_improve_count = 0
             torch.save(model.state_dict(), save_path)
             print("Saved best model.")
+        else:
+            no_improve_count += 1
+            if no_improve_count >= early_stopping_patience:
+                print("Early stopping triggered.")
+                break  # Training wird abgebrochen, da keine Verbesserung erfolgt
 
     print("Training complete.")
 
