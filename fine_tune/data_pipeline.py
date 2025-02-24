@@ -95,10 +95,6 @@ def process_path_with_augmentation(file_path, lookup_table, training=True, augme
     if training and augmentation is not None:
         img = augmentation(img, training=True)
     
-    # Add random erasing to simulate occlusions (like fingers)
-    if training:
-        img = tf.keras.layers.RandomErasing(value=0.0)(img, training=True)
-    
     return img, label
 
 def prepare_dataset(training_dir):
