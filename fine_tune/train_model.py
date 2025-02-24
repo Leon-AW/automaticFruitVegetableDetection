@@ -1,126 +1,21 @@
 import os
 import glob
 from tqdm import tqdm
-import yaml
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 import torchvision.models as models
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader
 import kagglehub
 import multiprocessing
-import urllib.request  # Needed for the patch
-import tensorflow as tf
-import fine_tune.data_pipeline as dp
-import torchvision.transforms.functional as TF
-import numpy as np
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 import json
-
-# --- Patch torch.hub.download_url_to_file to include a progress bar ---
-_original_download_url_to_file = torch.hub.download_url_to_file
-
-def download_url_to_file_with_progress(url, dst, hash_prefix=None, progress=True):
-    if not progress:
-        return _original_download_url_to_file(url, dst, hash_prefix, progress)
-    desc = os.path.basename(dst) or "download"
-    with tqdm(unit='B', unit_scale=True, miniters=1, desc=desc) as pbar:
-        last_block = [0]
-        def reporthook(block_num, block_size, total_size):
-            if total_size is not None:
-                pbar.total = total_size
-            pbar.update((block_num - last_block[0]) * block_size)
-            last_block[0] = block_num
-        urllib.request.urlretrieve(url, dst, reporthook=reporthook)
-
-torch.hub.download_url_to_file = download_url_to_file_with_progress
-
-# =============================================================================
-# Define custom datasets to wrap the TF data pipeline
-# =============================================================================
-
-class TFTrainingDataset(IterableDataset):
-    """
-    Uses the TensorFlow data pipeline (with augmentation) to yield training samples.
-    
-    The data_pipeline.prepare_dataset() function (from data_pipeline.py) is used to construct
-    a tf.data.Dataset, which is then unbatched. Each sample is converted from a TF tensor
-    (with values in [-1,1]) to a PyTorch tensor (converted to [0,1] then normalized).
-    """
-    def __init__(self, training_dir):
-        self.training_dir = training_dir
-        self.num_samples = dp.count_files(training_dir)
-        
-    def __iter__(self):
-        # Build TF dataset (with augmentation) from the training directory.
-        ds = dp.prepare_dataset(self.training_dir)  # returns a batched tf.data.Dataset
-        ds = ds.unbatch()  # Make it yield individual (image, label) examples
-        
-        for image, label in ds:
-            # Convert tf.Tensor (image is [H,W,3] in [-1,1]) to numpy
-            img_np = image.numpy()
-            # Convert from [-1,1] to [0,1]
-            img_np = (img_np + 1.0) / 2.0
-            # Transpose from H x W x C to C x H x W for PyTorch
-            img_np = np.transpose(img_np, (2, 0, 1))
-            img_tensor = torch.from_numpy(img_np).float()
-            # Normalize using ImageNet mean and std
-            img_tensor = TF.normalize(img_tensor, mean=[0.485, 0.456, 0.406],
-                                                  std=[0.229, 0.224, 0.225])
-            yield img_tensor, int(label.numpy())
-            
-    def __len__(self):
-        return self.num_samples
-
-# Helper function (for validation) without augmentation
-def process_path_no_aug(file_path, lookup_table):
-    parts = tf.strings.split(file_path, os.path.sep)
-    class_name = parts[-2]
-    label = lookup_table.lookup(class_name)
-    img = tf.io.read_file(file_path)
-    img = dp.decode_img(img)  # Resizes to dp.IMG_SIZE (224,224)
-    img = tf.keras.applications.efficientnet.preprocess_input(img)
-    return img, label
-
-class TFValidationDataset(IterableDataset):
-    """
-    Builds a TF data pipeline for validation (no augmentation) using the Test directory.
-    """
-    def __init__(self, test_dir):
-        self.test_dir = test_dir
-        self.num_samples = len(glob.glob(os.path.join(test_dir, "*", "*.jpg")))
-        # For the lookup table, use the (sorted) class names from the test directory.
-        self.class_names = sorted([
-            entry for entry in os.listdir(test_dir)
-            if os.path.isdir(os.path.join(test_dir, entry))
-        ])
-        keys = tf.constant(self.class_names)
-        values = tf.constant(list(range(len(self.class_names))), dtype=tf.int32)
-        self.lookup_table = tf.lookup.StaticHashTable(
-            initializer=tf.lookup.KeyValueTensorInitializer(keys, values),
-            default_value=-1)
-        
-    def __iter__(self):
-        pattern = os.path.join(self.test_dir, "*", "*.jpg")
-        list_ds = tf.data.Dataset.list_files(pattern, shuffle=False)
-        ds = list_ds.map(lambda x: process_path_no_aug(x, self.lookup_table),
-                         num_parallel_calls=dp.AUTOTUNE)
-        ds = ds.batch(1)
-        ds = ds.prefetch(buffer_size=dp.AUTOTUNE)
-        ds = ds.unbatch()
-        for image, label in ds:
-            img_np = image.numpy()
-            img_np = (img_np + 1.0) / 2.0
-            img_np = np.transpose(img_np, (2, 0, 1))
-            img_tensor = torch.from_numpy(img_np).float()
-            img_tensor = TF.normalize(img_tensor, mean=[0.485, 0.456, 0.406],
-                                                  std=[0.229, 0.224, 0.225])
-            yield img_tensor, int(label.numpy())
-            
-    def __len__(self):
-        return self.num_samples
+from PIL import Image
+from sklearn.metrics import precision_recall_fscore_support, accuracy_score
+import numpy as np
+from pathlib import Path
+from contextlib import nullcontext
 
 # =============================================================================
 # Main training function using the TF preprocessed data
@@ -154,57 +49,135 @@ def evaluate_model(model, data_loader, device):
     
     return all_predictions, all_labels
 
-def main():
-    # Use the TF-based pipeline for data loading.
-    # Download the dataset using the function from data_pipeline.py.
-    dataset_dir = dp.download_dataset()
-    training_dir = dp.get_training_dir(dataset_dir)
-    test_dir = os.path.join(dataset_dir, 
-                            "fruits-360_dataset_100x100",
-                            "fruits-360",
-                            "Test")
+def download_dataset():
+    """
+    Downloads the latest version of the fruits dataset using kagglehub.
+    """
+    path = kagglehub.dataset_download("moltean/fruits")
+    print("Path to dataset files:", path)
+    return path
+
+def get_optimal_batch_size(model, device):
+    """Calculate optimal batch size based on available GPU memory."""
+    if not torch.cuda.is_available():
+        return 8  # Default CPU batch size
     
-    # Show the class mapping (from the training directory)
-    temp_classes = sorted(os.listdir(training_dir))
+    # Get GPU memory in GB
+    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1e9
+    
+    # Rough estimation: assume each image + model overhead takes ~1.5GB for batch_size=32
+    # This is a conservative estimate that includes memory for gradients and optimizer states
+    estimated_memory_per_32_batch = 1.5
+    
+    optimal_batch_size = int((gpu_memory / estimated_memory_per_32_batch) * 32)
+    # Round down to nearest power of 2 for better performance
+    optimal_batch_size = 2 ** int(np.log2(optimal_batch_size))
+    
+    # Set reasonable bounds
+    optimal_batch_size = max(min(optimal_batch_size, 256), 16)
+    return optimal_batch_size
+
+def main():
+    # Create absolute path to models directory in project root and ensure it exists
+    project_root = Path(__file__).parent.parent
+    models_dir = project_root / 'models'
+    models_dir.mkdir(parents=True, exist_ok=True)
+    
+    model_name = "efficientnet_b3_fruits"
+    save_path = models_dir / f"{model_name}.pth"
+    metrics_path = models_dir / f"{model_name}_metrics.json"
+    
+    print(f"Model will be saved to: {save_path}")
+    print(f"Metrics will be saved to: {metrics_path}")
+
+    # Download the dataset from Kaggle Hub
+    dataset_path = download_dataset()
+
+    # Define the training and test directories based on the file structure.
+    training_dir = os.path.join(dataset_path, "fruits-360_dataset_100x100", "fruits-360", "Training")
+    test_dir = os.path.join(dataset_path, "fruits-360_dataset_100x100", "fruits-360", "Test")
+    
+    # Save one sample image from the training and test directories so you can inspect them.
+    train_image_paths = glob.glob(os.path.join(training_dir, "*", "*.jpg"))
+    test_image_paths = glob.glob(os.path.join(test_dir, "*", "*.jpg"))
+    
+    if train_image_paths:
+        sample_train_img = Image.open(train_image_paths[0])
+        sample_train_save_path = "sample_train.jpg"
+        sample_train_img.save(sample_train_save_path)
+        print("Saved a sample training image to:", sample_train_save_path)
+    else:
+        print("No training images found!")
+        
+    if test_image_paths:
+        sample_test_img = Image.open(test_image_paths[0])
+        sample_test_save_path = "sample_test.jpg"
+        sample_test_img.save(sample_test_save_path)
+        print("Saved a sample test image to:", sample_test_save_path)
+    else:
+        print("No test images found!")
+        
+    # Define a simple transform that converts the PIL image to a tensor.
+    # (We're not adding resizing, normalization, or augmentation in this case.)
+    transform = transforms.Compose([
+        transforms.ToTensor()
+    ])
+    
+    # Create datasets using ImageFolder (it builds the class mapping from folder names).
+    train_dataset = ImageFolder(root=training_dir, transform=transform)
+    val_dataset = ImageFolder(root=test_dir, transform=transform)
+    
+    # Show the class mapping.
     print("\nClass mapping:")
-    for idx, class_name in enumerate(temp_classes):
+    for idx, class_name in enumerate(train_dataset.classes):
         print(f"{idx}: {class_name}")
     
+    # Setup device and DataLoader parameters with optimal settings
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    if torch.cuda.is_available():
-        print(f"GPU: {torch.cuda.get_device_name()}")
-        print(f"Memory Available: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
     
-    # Reduce batch size to save memory
-    batch_size = 16 if torch.cuda.is_available() else 8
-    
-    # Create our custom TF-based datasets
-    train_dataset = TFTrainingDataset(training_dir)
-    val_dataset   = TFValidationDataset(test_dir)
-    
-    # When using IterableDataset, DataLoader cannot shuffle. We let the TF pipeline internally shuffle.
-    train_loader = DataLoader(
-        train_dataset, 
-        batch_size=batch_size, 
-        num_workers=0
-    )
-    
-    val_loader = DataLoader(
-        val_dataset, 
-        batch_size=batch_size, 
-        num_workers=0
-    )
-    
-    # Define the model: load EfficientNet B3 from torchvision and replace the classifier.
+    # Load EfficientNet B3 and adjust its classifier to fit our number of classes.
     model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
     in_features = model.classifier[1].in_features
     model.classifier = nn.Sequential(
         nn.Dropout(0.3),
         nn.BatchNorm1d(in_features),
-        nn.Linear(in_features, len(temp_classes))
+        nn.Linear(in_features, len(train_dataset.classes))
     )
     model = model.to(device)
+    
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name()}")
+        print(f"Memory Available: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+        
+        # Set optimal batch size based on GPU memory
+        batch_size = get_optimal_batch_size(model, device)
+        # Use number of CPU cores for DataLoader workers, leaving some cores free
+        num_workers = max(1, multiprocessing.cpu_count() - 2)
+        # Enable pinned memory for faster GPU transfer
+        pin_memory = True
+    else:
+        batch_size = 8
+        num_workers = 0
+        pin_memory = False
+    
+    print(f"Using batch size: {batch_size}")
+    print(f"Using {num_workers} worker processes")
+    
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True, 
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers,
+        pin_memory=pin_memory
+    )
     
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs!")
@@ -214,23 +187,17 @@ def main():
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
-    scaler = torch.amp.GradScaler() if torch.cuda.is_available() else None
+    # Set up gradient scaler for mixed precision training
+    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
     
     num_epochs = 10
     early_stopping_patience = 3
     no_improve_count = 0
     best_val_loss = float("inf")
-    
     grad_accum_steps = 4  # Accumulate gradients over 4 batches
+    max_grad_norm = 1.0  # For gradient clipping
     
-    # Create models directory if it doesn't exist
-    os.makedirs('models', exist_ok=True)
-    
-    # Update save paths for model and metrics
-    model_name = "efficientnet_b3_fruits"
-    save_path = os.path.join("models", f"{model_name}.pth")
-    metrics_path = os.path.join("models", f"{model_name}_metrics.json")
-    
+    # Main training loop.
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch+1}/{num_epochs}")
         model.train()
@@ -241,22 +208,33 @@ def main():
         train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch+1}", leave=True)
         for i, (images, labels) in enumerate(train_pbar):
             images, labels = images.to(device), labels.to(device)
-            optimizer.zero_grad()
             
-            if torch.cuda.is_available():
-                with torch.amp.autocast(device_type='cuda'):
-                    outputs = model(images)
-                    loss = criterion(outputs, labels)
-                scaler.scale(loss).backward()
-                if (i + 1) % grad_accum_steps == 0 or (i + 1) == len(train_loader):
-                    scaler.step(optimizer)
-                    scaler.update()
-            else:
+            # Forward pass
+            with torch.amp.autocast('cuda') if torch.cuda.is_available() else nullcontext():
                 outputs = model(images)
                 loss = criterion(outputs, labels)
+            
+            # Skip this batch if we get NaN loss
+            if torch.isnan(loss).item() or torch.isinf(loss).item():
+                print(f"WARNING: NaN or Inf loss detected, skipping batch")
+                continue
+                
+            # Backward pass
+            if torch.cuda.is_available():
+                scaler.scale(loss).backward()
+                if (i + 1) % grad_accum_steps == 0 or (i + 1) == len(train_loader):
+                    # Clip gradients to prevent explosion
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad()
+            else:
                 loss.backward()
                 if (i + 1) % grad_accum_steps == 0 or (i + 1) == len(train_loader):
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
                     optimizer.step()
+                    optimizer.zero_grad()
             
             running_loss += loss.item() * images.size(0)
             _, predicted = torch.max(outputs, 1)
@@ -272,24 +250,27 @@ def main():
         train_acc = correct / total
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
         
+        # Validate after the training epoch.
         model.eval()
         val_loss = 0.0
         correct_val = 0
         total_val = 0
+        nan_batches = 0
         
         val_pbar = tqdm(val_loader, desc="Validation", leave=True)
         with torch.no_grad():
             for images, labels in val_pbar:
                 images, labels = images.to(device), labels.to(device)
                 
-                if torch.cuda.is_available():
-                    with torch.amp.autocast(device_type='cuda'):
-                        outputs = model(images)
-                        loss = criterion(outputs, labels)
-                else:
+                with torch.amp.autocast('cuda') if torch.cuda.is_available() else nullcontext():
                     outputs = model(images)
                     loss = criterion(outputs, labels)
                 
+                # Skip this batch if we get NaN loss
+                if torch.isnan(loss).item() or torch.isinf(loss).item():
+                    nan_batches += 1
+                    continue
+                    
                 val_loss += loss.item() * images.size(0)
                 _, predicted = torch.max(outputs, 1)
                 total_val += labels.size(0)
@@ -299,59 +280,62 @@ def main():
                     'loss': f'{loss.item():.4f}',
                     'acc': f'{100.0 * correct_val / total_val:.2f}%'
                 })
+        
+        if nan_batches > 0:
+            print(f"WARNING: {nan_batches} validation batches had NaN loss and were skipped")
+        
+        if total_val > 0:  # Only calculate metrics if we have valid batches
+            val_loss = val_loss / total_val
+            val_acc = correct_val / total_val
+            print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
+            
+            scheduler.step(val_loss)
+            
+            # Check for improvement
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                no_improve_count = 0
                 
-        val_loss = val_loss / len(val_dataset)
-        val_acc = correct_val / total_val
-        print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
-        
-        scheduler.step(val_loss)
-        
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            no_improve_count = 0
-            
-            # Save the model
-            torch.save({
-                'epoch': epoch,
-                'model_state_dict': model.state_dict(),
-                'optimizer_state_dict': optimizer.state_dict(),
-                'val_loss': val_loss,
-                'val_acc': val_acc
-            }, save_path)
-            print(f"Saved best model to {save_path}")
-            
-            # Calculate and save metrics for the best model
-            y_pred, y_true = evaluate_model(model, val_loader, device)
-            metrics = calculate_metrics(y_true, y_pred)
-            
-            # Add validation loss and accuracy
-            metrics['val_loss'] = float(val_loss)
-            metrics['val_accuracy'] = float(val_acc)
-            
-            # Save metrics to JSON file
-            with open(metrics_path, 'w') as f:
-                json.dump(metrics, f, indent=4)
-            print(f"Saved metrics to {metrics_path}")
-            
-            print("\nBest model metrics:")
-            print(f"Accuracy: {metrics['accuracy']:.4f}")
-            print(f"Precision: {metrics['precision']:.4f}")
-            print(f"Recall: {metrics['recall']:.4f}")
-            print(f"F1-score: {metrics['f1_score']:.4f}")
+                # Save the best model
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'val_loss': val_loss,
+                    'val_acc': val_acc
+                }, save_path)
+                print(f"Saved best model to {save_path}")
+                
+                # Evaluate to calculate detailed metrics
+                y_pred, y_true = evaluate_model(model, val_loader, device)
+                metrics = calculate_metrics(y_true, y_pred)
+                metrics['val_loss'] = float(val_loss)
+                metrics['val_accuracy'] = float(val_acc)
+                
+                with open(metrics_path, 'w') as f:
+                    json.dump(metrics, f, indent=4)
+                print(f"Saved metrics to {metrics_path}")
+                
+                print("\nBest model metrics:")
+                print(f"Accuracy: {metrics['accuracy']:.4f}")
+                print(f"Precision: {metrics['precision']:.4f}")
+                print(f"Recall: {metrics['recall']:.4f}")
+                print(f"F1-score: {metrics['f1_score']:.4f}")
+            else:
+                no_improve_count += 1
+                if no_improve_count >= early_stopping_patience:
+                    print("Early stopping triggered.")
+                    break
         else:
-            no_improve_count += 1
-            if no_improve_count >= early_stopping_patience:
-                print("Early stopping triggered.")
-                break
-                
+            print("WARNING: All validation batches had NaN loss, skipping this epoch for model saving")
+
     print("Training complete.")
     
-    # Load the best model and compute final metrics
+    # Load the best model and compute the final metrics.
     print("\nComputing final metrics using best model...")
     checkpoint = torch.load(save_path)
     model.load_state_dict(checkpoint['model_state_dict'])
     
-    # Calculate final metrics on validation set
     y_pred, y_true = evaluate_model(model, val_loader, device)
     final_metrics = calculate_metrics(y_true, y_pred)
     

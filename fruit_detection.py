@@ -70,7 +70,7 @@ def main():
         num_classes = len(all_classes)
         print(f"Number of classes from dataset: {num_classes}")
         
-        MODEL_PATH = Path("models/fine_tuned_efficientnet_b3.pth")
+        MODEL_PATH = Path("models/efficientnet_b3_fruits.pth")
         
         model = load_efficientnet(MODEL_PATH, num_classes)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
