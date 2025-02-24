@@ -4,7 +4,6 @@ import yaml
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torchvision
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 import torchvision.models as models
@@ -12,7 +11,6 @@ from torch.utils.data import DataLoader
 import kagglehub
 import multiprocessing
 import urllib.request  # Needed for the patch
-from sklearn.model_selection import KFold
 
 # --- Patch torch.hub.download_url_to_file to include a progress bar ---
 _original_download_url_to_file = torch.hub.download_url_to_file
@@ -33,62 +31,45 @@ def download_url_to_file_with_progress(url, dst, hash_prefix=None, progress=True
 torch.hub.download_url_to_file = download_url_to_file_with_progress
 
 def main():
-    # --- Load classes from YAML ---
     with open("classes.yaml", "r") as f:
         classes_data = yaml.safe_load(f)
     all_classes = list(classes_data["fruit_and_vegetables"].keys())
     num_classes = len(all_classes)
     print(f"Number of classes from YAML: {num_classes}")
 
-    # --- Device configuration ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    num_workers = 4 if torch.cuda.is_available() else 2  # Mehr Worker bei GPU
-    pin_memory = torch.cuda.is_available()  # Pin memory nur, wenn GPU verwendet wird
+    num_workers = 4 if torch.cuda.is_available() else 2
+    pin_memory = torch.cuda.is_available()
     
     print(f"Using device: {device}")
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name()}")
         print(f"Memory Available: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
-    # --- Dataset & Transforms ---
-    # Get the dataset directory from kagglehub
     dataset_dir = kagglehub.dataset_download("moltean/fruits")
 
-    # Adapted path: Use the new dataset structure
-    # Now the downloaded dataset will have:
-    #   dataset_dir/
-    #       fruits-360_dataset_100x100/
-    #           fruits-360/
-    #               Training/
-    #               Test/
-    #               Readme.md
-    #               LICENSE
     train_dir = os.path.join(dataset_dir, 
+                             "fruits-360_dataset_100x100",
+                             "fruits-360",
+                             "Training")
+    test_dir = os.path.join(dataset_dir, 
                             "fruits-360_dataset_100x100",
                             "fruits-360",
-                            "Training")
-    test_dir = os.path.join(dataset_dir, 
-                           "fruits-360_dataset_100x100",
-                           "fruits-360",
-                           "Test")
+                            "Test")
 
-    # Lade den Datensatz zunächst, um die tatsächlichen Klassen zu erhalten
     temp_dataset = ImageFolder(root=train_dir)
     dataset_classes = temp_dataset.classes
     
-    # Verify class alignment
     if len(dataset_classes) != num_classes:
         print(f"Warning: Mismatch between YAML classes ({num_classes}) and dataset classes ({len(dataset_classes)})")
         print("Using dataset classes instead of YAML classes")
         num_classes = len(dataset_classes)
         all_classes = dataset_classes
 
-    # Print class mapping for debugging
     print("\nClass mapping:")
     for idx, class_name in enumerate(dataset_classes):
         print(f"{idx}: {class_name}")
 
-    # EfficientNet-B3 recommends an input size of 300x300.
     train_transforms = transforms.Compose([
         transforms.RandomResizedCrop(300),
         transforms.RandomHorizontalFlip(),
@@ -108,17 +89,14 @@ def main():
                              std=[0.229, 0.224, 0.225])
     ])
 
-    # Load the dataset using the directories provided in the dataset.
     train_dataset = ImageFolder(root=train_dir, transform=train_transforms)
     val_dataset   = ImageFolder(root=test_dir, transform=val_transforms)
 
     print(f"Total training images: {len(train_dataset)}")
     print(f"Total validation images: {len(val_dataset)}")
 
-    # Adjust batch size based on available memory
     batch_size = 64 if torch.cuda.is_available() else 32
     
-    # Data loaders with optimized settings for GPU/CPU
     train_loader = DataLoader(
         train_dataset, 
         batch_size=batch_size, 
@@ -137,14 +115,12 @@ def main():
         persistent_workers=True if num_workers > 0 else False
     )
 
-    # --- Model Setup ---
-    # This call will trigger the download (if not cached) and show a progress bar.
     model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
     in_features = model.classifier[1].in_features
     model.classifier = nn.Sequential(
-        nn.Dropout(0.3),                  # Dropout zum Schutz vor Overfitting
-        nn.BatchNorm1d(in_features),       # Batch Normalization zur Stabilisierung des Lernens
-        nn.Linear(in_features, num_classes)  # Finaler Linear-Layer für die Klassifizierung
+        nn.Dropout(0.3),
+        nn.BatchNorm1d(in_features),
+        nn.Linear(in_features, num_classes)
     )
     model = model.to(device)
 
@@ -152,16 +128,14 @@ def main():
         print(f"Using {torch.cuda.device_count()} GPUs!")
         model = nn.DataParallel(model)
 
-    # --- Training Setup ---
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
     scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
 
-    # --- Training Loop ---
     num_epochs = 10
-    early_stopping_patience = 3  # Abbruch, wenn sich der Validierungs-Loss 5 Epochen lang nicht verbessert
+    early_stopping_patience = 3
     no_improve_count = 0
     best_val_loss = float("inf")
     save_path = "fine_tuned_efficientnet_b3.pth"
@@ -207,7 +181,6 @@ def main():
         train_acc = correct / total
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
 
-        # Validation phase
         model.eval()
         val_loss = 0.0
         correct_val = 0
@@ -252,7 +225,7 @@ def main():
             no_improve_count += 1
             if no_improve_count >= early_stopping_patience:
                 print("Early stopping triggered.")
-                break  # Training wird abgebrochen, da keine Verbesserung erfolgt
+                break
 
     print("Training complete.")
 
