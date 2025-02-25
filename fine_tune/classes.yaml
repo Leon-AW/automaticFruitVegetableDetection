@@ -1,0 +1,134 @@
+fruit_and_vegetables:
+  Apples:
+    - Crimson Snow
+    - Golden
+    - Golden-Red
+    - Granny Smith
+    - Pink Lady
+    - Red
+    - Red Delicious
+  Apricot: []
+  Avocado: []
+  Avocado ripe: []
+  Banana:
+    - Yellow
+    - Red
+    - Lady Finger
+  Beetroot Red: []
+  Blueberry: []
+  Cabbage: []
+  Cactus fruit: []
+  Cantaloupe:
+    - Variety 1
+    - Variety 2
+  Carambula: []
+  Carrot: []
+  Cauliflower: []
+  Cherry:
+    - Rainier
+  Cherry Wax:
+    - Yellow
+    - Red
+    - Black
+  Chestnut: []
+  Clementine: []
+  Cocos: []
+  Corn:
+    - with husk
+  Cucumber:
+    - ripened
+    - regular
+  Dates: []
+  Eggplant: []
+  Fig: []
+  Ginger Root: []
+  Granadilla: []
+  Grape:
+    - Blue
+    - Pink
+    - White
+  Grapefruit:
+    - Pink
+    - White
+  Guava: []
+  Hazelnut: []
+  Huckleberry: []
+  Kiwi: []
+  Kaki: []
+  Kohlrabi: []
+  Kumsquats: []
+  Lemon:
+    - normal
+    - Meyer
+  Lime: []
+  Lychee: []
+  Mandarine: []
+  Mango:
+    - Green
+    - Red
+  Mangostan: []
+  Maracuja: []
+  Melon Piel de Sapo: []
+  Mulberry: []
+  Nectarine:
+    - Regular
+    - Flat
+  Nut:
+    - Forest
+    - Pecan
+  Onion:
+    - Red
+    - White
+  Orange: []
+  Papaya: []
+  Passion fruit: []
+  Peach: []
+  Pepino: []
+  Pear:
+    - Abate
+    - Forelle
+    - Kaiser
+    - Monster
+    - Red
+    - Stone
+    - Williams
+  Pepper:
+    - Red
+    - Green
+    - Orange
+    - Yellow
+  Physalis:
+    - normal
+    - with Husk
+  Pineapple:
+    - normal
+    - Mini
+  Pitahaya Red: []
+  Plum: []
+  Pomegranate: []
+  Pomelo Sweetie: []
+  Potato:
+    - Red
+    - Sweet
+    - White
+  Quince: []
+  Rambutan: []
+  Raspberry: []
+  Redcurrant: []
+  Salak: []
+  Strawberry:
+    - normal
+    - Wedge
+  Tamarillo: []
+  Tangelo: []
+  Tomato:
+    - Maroon
+    - Cherry Red
+    - Yellow
+    - not ripened
+    - Heart
+  Walnut: []
+  Watermelon: []
+  Zucchini:
+    - green
+    - dark 

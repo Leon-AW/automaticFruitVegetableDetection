@@ -1,274 +1,405 @@
 import os
-import glob
 from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchvision
 import torchvision.transforms as transforms
 from torchvision.datasets import ImageFolder
 import torchvision.models as models
 from torch.utils.data import DataLoader
 import kagglehub
 import multiprocessing
-import json
-from PIL import Image
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score
+from torch.amp import autocast, GradScaler
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.metrics import confusion_matrix
+import seaborn as sns
+import random
 
-# =============================================================================
-# Main training function using the TF preprocessed data
-# =============================================================================
+# Early stopping class to prevent overfitting
+class EarlyStopping:
+    def __init__(self, patience=5, min_delta=0, verbose=True):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.verbose = verbose
+        self.counter = 0
+        self.best_loss = float('inf')
+        self.early_stop = False
+        
+    def __call__(self, val_loss):
+        if val_loss < self.best_loss - self.min_delta:
+            self.best_loss = val_loss
+            self.counter = 0
+        else:
+            self.counter += 1
+            if self.verbose:
+                print(f"EarlyStopping counter: {self.counter} out of {self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+                if self.verbose:
+                    print("Early stopping triggered")
+        return self.early_stop
 
-def calculate_metrics(y_true, y_pred):
-    """Calculate accuracy, precision, recall and f1-score."""
-    accuracy = accuracy_score(y_true, y_pred)
-    precision, recall, f1, _ = precision_recall_fscore_support(y_true, y_pred, average='weighted')
-    return {
-        'accuracy': float(accuracy),
-        'precision': float(precision),
-        'recall': float(recall),
-        'f1_score': float(f1)
-    }
-
-def evaluate_model(model, data_loader, device):
-    """Evaluate model and return predictions and true labels."""
-    model.eval()
-    all_predictions = []
-    all_labels = []
+# Function to visualize and save preprocessed images
+def visualize_preprocessed_images(dataloader, class_names, save_dir="images/preprocessed"):
+    os.makedirs(save_dir, exist_ok=True)
     
-    with torch.no_grad():
-        for images, labels in tqdm(data_loader, desc="Evaluating"):
-            images = images.to(device)
-            outputs = model(images)
-            _, predicted = torch.max(outputs, 1)
-            
-            all_predictions.extend(predicted.cpu().numpy())
-            all_labels.extend(labels.numpy())
+    # Get a batch of images
+    images, labels = next(iter(dataloader))
+    images = images.cpu()  # Move to CPU for visualization
     
-    return all_predictions, all_labels
-
-def download_dataset():
-    """
-    Downloads the latest version of the fruits dataset using kagglehub.
-    """
-    path = kagglehub.dataset_download("moltean/fruits")
-    print("Path to dataset files:", path)
-    return path
+    # Create a grid of images
+    grid_size = min(16, len(images))
+    selected_indices = random.sample(range(len(images)), grid_size)
+    
+    # Function to denormalize images for visualization
+    def denormalize(tensor):
+        mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
+        std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
+        return tensor * std + mean
+    
+    # Plot the grid
+    fig, axes = plt.subplots(4, 4, figsize=(12, 12))
+    for i, idx in enumerate(selected_indices):
+        ax = axes[i//4, i%4]
+        img = denormalize(images[idx]).permute(1, 2, 0).numpy()
+        img = np.clip(img, 0, 1)
+        ax.imshow(img)
+        label_idx = labels[idx].item()
+        ax.set_title(class_names[label_idx])
+        ax.axis('off')
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(save_dir, "preprocessed_samples.png"))
+    print(f"Saved preprocessed images to {os.path.join(save_dir, 'preprocessed_samples.png')}")
+    plt.close()
 
 def main():
-    # Download the dataset from Kaggle Hub
-    dataset_path = download_dataset()
-
-    # Define the training and test directories based on the file structure.
-    training_dir = os.path.join(dataset_path, "fruits-360_dataset_100x100", "fruits-360", "Training")
-    test_dir = os.path.join(dataset_path, "fruits-360_dataset_100x100", "fruits-360", "Test")
-    
-    # Save one sample image from the training and test directories so you can inspect them.
-    train_image_paths = glob.glob(os.path.join(training_dir, "*", "*.jpg"))
-    test_image_paths = glob.glob(os.path.join(test_dir, "*", "*.jpg"))
-    
-    if train_image_paths:
-        sample_train_img = Image.open(train_image_paths[0])
-        sample_train_save_path = "sample_train.jpg"
-        sample_train_img.save(sample_train_save_path)
-        print("Saved a sample training image to:", sample_train_save_path)
-    else:
-        print("No training images found!")
-        
-    if test_image_paths:
-        sample_test_img = Image.open(test_image_paths[0])
-        sample_test_save_path = "sample_test.jpg"
-        sample_test_img.save(sample_test_save_path)
-        print("Saved a sample test image to:", sample_test_save_path)
-    else:
-        print("No test images found!")
-        
-    # Define a simple transform that converts the PIL image to a tensor.
-    # (We're not adding resizing, normalization, or augmentation in this case.)
-    transform = transforms.Compose([
-        transforms.ToTensor()
-    ])
-    
-    # Create datasets using ImageFolder (it builds the class mapping from folder names).
-    train_dataset = ImageFolder(root=training_dir, transform=transform)
-    val_dataset = ImageFolder(root=test_dir, transform=transform)
-    
-    # Show the class mapping.
-    print("\nClass mapping:")
-    for idx, class_name in enumerate(train_dataset.classes):
-        print(f"{idx}: {class_name}")
-    
-    # Setup device and DataLoader parameters.
+    # --- Device configuration ---
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    num_workers = 4 if torch.cuda.is_available() else 2  # More workers for GPU
+    pin_memory = torch.cuda.is_available()  # Only pin memory if using GPU
+    
     print(f"Using device: {device}")
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name()}")
         print(f"Memory Available: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+
+    # --- Dataset & Transforms ---
+    # Get the dataset directory from kagglehub
+    dataset_dir = kagglehub.dataset_download("moltean/fruits")
     
-    batch_size = 16 if torch.cuda.is_available() else 8
+    # Print the dataset directory structure to understand available data
+    print(f"Dataset directory: {dataset_dir}")
+    print("Contents of dataset directory:")
+    for item in os.listdir(dataset_dir):
+        print(f" - {item}")
+        if os.path.isdir(os.path.join(dataset_dir, item)):
+            for subitem in os.listdir(os.path.join(dataset_dir, item)):
+                print(f"   - {subitem}")
+
+    # Find main dataset directory (looking for the directory containing Training and Test folders)
+    dataset_folders = []
+    for root, dirs, files in os.walk(dataset_dir):
+        if "Training" in dirs and "Test" in dirs:
+            dataset_folders.append(root)
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    if not dataset_folders:
+        raise ValueError("Could not find Training and Test directories in the dataset")
     
-    # Load EfficientNet B3 and adjust its classifier to fit our number of classes.
-    model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
-    in_features = model.classifier[1].in_features
-    model.classifier = nn.Sequential(
-        nn.Dropout(0.3),
-        nn.BatchNorm1d(in_features),
-        nn.Linear(in_features, len(train_dataset.classes))
+    # Use the first found dataset directory (or choose the one with most images if multiple)
+    main_dataset_dir = dataset_folders[0]
+    print(f"\nUsing dataset from: {main_dataset_dir}")
+    
+    # Construct the full paths to Training and Test directories
+    train_dir = os.path.join(main_dataset_dir, "Training")
+    test_dir = os.path.join(main_dataset_dir, "Test")
+
+    # Verify the directories exist
+    if not os.path.isdir(train_dir):
+        raise ValueError(f"Training directory {train_dir} does not exist.")
+    if not os.path.isdir(test_dir):
+        raise ValueError(f"Test directory {test_dir} does not exist.")
+
+    print(f"Training directory: {train_dir}")
+    print(f"Test directory: {test_dir}")
+
+    # More aggressive data augmentation to prevent overfitting
+    train_transforms = transforms.Compose([
+        transforms.Resize((300, 300)),  # Fixed size for both dimensions
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(p=0.1),  # Added vertical flip
+        transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+        transforms.RandomGrayscale(p=0.02),  # Occasional grayscale
+        transforms.ToTensor(),
+        transforms.ConvertImageDtype(torch.float),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225]),
+        transforms.RandomErasing(p=0.2)  # Increased random erasing from 0.1 to 0.2
+    ])
+
+    val_transforms = transforms.Compose([
+        transforms.Resize((300, 300)),  # Fixed size for both dimensions
+        transforms.ToTensor(),
+        transforms.ConvertImageDtype(torch.float),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    # Load the dataset using the directories provided in the dataset.
+    train_dataset = ImageFolder(root=train_dir, transform=train_transforms)
+    val_dataset = ImageFolder(root=test_dir, transform=val_transforms)
+    
+    # Get class information directly from the dataset
+    all_classes = train_dataset.classes
+    num_classes = len(all_classes)
+    print(f"Number of classes detected: {num_classes}")
+    print(f"Classes: {all_classes}")
+
+    print(f"Total training images: {len(train_dataset)}")
+    print(f"Total validation images: {len(val_dataset)}")
+
+    # Adjust batch size based on available memory
+    batch_size = 64 if torch.cuda.is_available() else 32
+    
+    # Data loaders with optimized settings for GPU/CPU
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=True if num_workers > 0 else False
     )
-    model = model.to(device)
     
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size, 
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=True if num_workers > 0 else False
+    )
+    
+    # Visualize preprocessed images before training
+    visualize_preprocessed_images(train_loader, all_classes)
+
+    # --- Model Setup ---
+    model = models.efficientnet_b3(weights=models.EfficientNet_B3_Weights.IMAGENET1K_V1)
+    
+    # Increase dropout for better regularization
+    model.classifier[0] = nn.Dropout(p=0.4, inplace=True)  # Increased from default 0.3
+    
+    # Replace the classifier head of EfficientNet-B3
+    in_features = model.classifier[1].in_features
+    model.classifier[1] = nn.Linear(in_features, num_classes)
+    model = model.to(device)
+
+    # Enable parallel processing if multiple GPUs are available
     if torch.cuda.device_count() > 1:
         print(f"Using {torch.cuda.device_count()} GPUs!")
         model = nn.DataParallel(model)
-    
+
+    # --- Training Setup ---
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
-    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
+    # Increased weight decay for regularization
+    optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.02)
     
-    num_epochs = 10
-    early_stopping_patience = 3
-    no_improve_count = 0
+    # Using CosineAnnealingLR for better convergence
+    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=1e-6)
+    
+    # Initialize gradient scaler for mixed precision training
+    scaler = GradScaler('cuda') if torch.cuda.is_available() else None
+    
+    # Set up early stopping
+    early_stopping = EarlyStopping(patience=2)
+
+    # --- Training Loop ---
+    num_epochs = 20
     best_val_loss = float("inf")
-    grad_accum_steps = 4  # Accumulate gradients over 4 batches
+    best_val_acc = 0.0
+    save_path = "models/fine_tuned_efficientnet_b3.pth"
+    results_dir = "images/results"
+    os.makedirs(results_dir, exist_ok=True)
     
-    # Create directory to save models and metrics.
-    os.makedirs('models', exist_ok=True)
-    model_name = "efficientnet_b3_fruits"
-    save_path = os.path.join("models", f"{model_name}.pth")
-    metrics_path = os.path.join("models", f"{model_name}_metrics.json")
-    
-    # Main training loop.
+    train_losses, val_losses = [], []
+    train_accs, val_accs = [], []
+
     for epoch in range(num_epochs):
         print(f"\nEpoch {epoch+1}/{num_epochs}")
         model.train()
         running_loss = 0.0
         correct = 0
         total = 0
+
+        # Training phase with progress bar
+        train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch+1}", 
+                         leave=True)
         
-        train_pbar = tqdm(train_loader, desc=f"Training Epoch {epoch+1}", leave=True)
-        for i, (images, labels) in enumerate(train_pbar):
+        for images, labels in train_pbar:
             images, labels = images.to(device), labels.to(device)
+            
             optimizer.zero_grad()
             
             if torch.cuda.is_available():
-                with torch.amp.autocast('cuda'):
+                # Use mixed precision training on GPU
+                with autocast('cuda'):
                     outputs = model(images)
                     loss = criterion(outputs, labels)
+                
                 scaler.scale(loss).backward()
-                if (i + 1) % grad_accum_steps == 0 or (i + 1) == len(train_loader):
-                    scaler.step(optimizer)
-                    scaler.update()
+                scaler.step(optimizer)
+                scaler.update()
             else:
+                # Regular training on CPU
                 outputs = model(images)
                 loss = criterion(outputs, labels)
                 loss.backward()
-                if (i + 1) % grad_accum_steps == 0 or (i + 1) == len(train_loader):
-                    optimizer.step()
+                optimizer.step()
             
             running_loss += loss.item() * images.size(0)
             _, predicted = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             
+            # Update progress bar with current loss and accuracy
             train_pbar.set_postfix({
                 'loss': f'{loss.item():.4f}',
                 'acc': f'{100.0 * correct / total:.2f}%'
             })
-        
+
         train_loss = running_loss / len(train_dataset)
         train_acc = correct / total
+        train_losses.append(train_loss)
+        train_accs.append(train_acc)
         print(f"Train Loss: {train_loss:.4f} | Train Acc: {train_acc:.4f}")
-        
-        # Validate after the training epoch.
+
+        # Validation phase
         model.eval()
         val_loss = 0.0
         correct_val = 0
         total_val = 0
-        
+        all_preds = []
+        all_labels = []
+
         val_pbar = tqdm(val_loader, desc="Validation", leave=True)
+        
         with torch.no_grad():
             for images, labels in val_pbar:
                 images, labels = images.to(device), labels.to(device)
                 
                 if torch.cuda.is_available():
-                    with torch.amp.autocast('cuda'):
+                    with autocast('cuda'):
                         outputs = model(images)
                         loss = criterion(outputs, labels)
                 else:
                     outputs = model(images)
                     loss = criterion(outputs, labels)
-                    
+                
                 val_loss += loss.item() * images.size(0)
                 _, predicted = torch.max(outputs, 1)
                 total_val += labels.size(0)
                 correct_val += (predicted == labels).sum().item()
                 
+                # Save predictions and labels for confusion matrix
+                all_preds.extend(predicted.cpu().numpy())
+                all_labels.extend(labels.cpu().numpy())
+                
+                # Update validation progress bar
                 val_pbar.set_postfix({
                     'loss': f'{loss.item():.4f}',
                     'acc': f'{100.0 * correct_val / total_val:.2f}%'
                 })
-        
+
         val_loss = val_loss / len(val_dataset)
         val_acc = correct_val / total_val
+        val_losses.append(val_loss)
+        val_accs.append(val_acc)
         print(f"Val Loss: {val_loss:.4f} | Val Acc: {val_acc:.4f}")
+
+        # Learning rate scheduling
+        scheduler.step()
         
-        scheduler.step(val_loss)
+        # Create confusion matrix every 5 epochs
+        if (epoch + 1) % 5 == 0 or epoch == num_epochs - 1:
+            # Create confusion matrix (only for a subset of classes if there are too many)
+            plt.figure(figsize=(12, 10))
+            if num_classes > 20:
+                # If too many classes, show a subset of most confused classes
+                cm = confusion_matrix(all_labels, all_preds)
+                error_indices = np.where((cm.diagonal() / cm.sum(axis=1)) < 0.9)[0]
+                selected_indices = error_indices[:min(20, len(error_indices))]
+                if len(selected_indices) < 5:  # If not enough errors, just show first 20 classes
+                    selected_indices = range(min(20, num_classes))
+                
+                cm_subset = confusion_matrix([l for i, l in enumerate(all_labels) if l in selected_indices], 
+                                            [p for i, p in enumerate(all_preds) if all_labels[i] in selected_indices])
+                selected_class_names = [all_classes[i] for i in selected_indices]
+                sns.heatmap(cm_subset, annot=True, fmt='d', cmap='Blues', 
+                          xticklabels=selected_class_names, yticklabels=selected_class_names)
+                plt.title(f'Confusion Matrix (Selected Classes) - Epoch {epoch+1}')
+            else:
+                cm = confusion_matrix(all_labels, all_preds)
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                          xticklabels=all_classes, yticklabels=all_classes)
+                plt.title(f'Confusion Matrix - Epoch {epoch+1}')
+                
+            plt.ylabel('True Label')
+            plt.xlabel('Predicted Label')
+            plt.tight_layout()
+            plt.savefig(f"{results_dir}/confusion_matrix_epoch_{epoch+1}.png")
+            plt.close()
         
-        # Check for improvement.
-        if val_loss < best_val_loss:
+        # Plot training and validation metrics
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(train_losses, label='Train Loss')
+        plt.plot(val_losses, label='Val Loss')
+        plt.title('Loss Curves')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        plt.legend()
+        
+        plt.subplot(1, 2, 2)
+        plt.plot(train_accs, label='Train Acc')
+        plt.plot(val_accs, label='Val Acc')
+        plt.title('Accuracy Curves')
+        plt.xlabel('Epoch')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        
+        plt.tight_layout()
+        plt.savefig(f"{results_dir}/training_curves.png")
+        plt.close()
+        
+        # Save best model based on validation accuracy
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             best_val_loss = val_loss
-            no_improve_count = 0
-            
-            # Save the best model.
-            torch.save({
+            # Save model state
+            save_dict = {
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
-                'val_loss': val_loss,
-                'val_acc': val_acc
-            }, save_path)
-            print(f"Saved best model to {save_path}")
-            
-            # Evaluate to calculate detailed metrics.
-            y_pred, y_true = evaluate_model(model, val_loader, device)
-            metrics = calculate_metrics(y_true, y_pred)
-            metrics['val_loss'] = float(val_loss)
-            metrics['val_accuracy'] = float(val_acc)
-            
-            with open(metrics_path, 'w') as f:
-                json.dump(metrics, f, indent=4)
-            print(f"Saved metrics to {metrics_path}")
-            
-            print("\nBest model metrics:")
-            print(f"Accuracy: {metrics['accuracy']:.4f}")
-            print(f"Precision: {metrics['precision']:.4f}")
-            print(f"Recall: {metrics['recall']:.4f}")
-            print(f"F1-score: {metrics['f1_score']:.4f}")
-        else:
-            no_improve_count += 1
-            if no_improve_count >= early_stopping_patience:
-                print("Early stopping triggered.")
-                break
-                
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_val_loss': best_val_loss,
+                'best_val_acc': best_val_acc,
+                'num_classes': num_classes,
+                'class_names': all_classes
+            }
+            torch.save(save_dict, save_path)
+            print(f"Saved best model with accuracy: {best_val_acc:.4f}")
+        
+        # Check for early stopping
+        if early_stopping(val_loss):
+            print("Early stopping triggered. Ending training.")
+            break
+
     print("Training complete.")
-    
-    # Load the best model and compute the final metrics.
-    print("\nComputing final metrics using best model...")
-    checkpoint = torch.load(save_path)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    
-    y_pred, y_true = evaluate_model(model, val_loader, device)
-    final_metrics = calculate_metrics(y_true, y_pred)
-    
-    print("\nFinal Model Metrics:")
-    print(f"Accuracy: {final_metrics['accuracy']:.4f}")
-    print(f"Precision: {final_metrics['precision']:.4f}")
-    print(f"Recall: {final_metrics['recall']:.4f}")
-    print(f"F1-score: {final_metrics['f1_score']:.4f}")
+    print(f"Best validation accuracy: {best_val_acc:.4f}")
+    print(f"Best validation loss: {best_val_loss:.4f}")
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
